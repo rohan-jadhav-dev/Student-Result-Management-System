@@ -104,6 +104,28 @@ MiniProject/
 ├── mysql-connector-j-9.6.0.jar       ← JDBC driver dependency
 └── MiniProject.iml                   ← IntelliJ module config
 ```
+---
+
+## 📸 Screenshots
+
+> A visual walkthrough of SRMS in action.
+
+### 🔐 Login Portal
+![Login Screen](Screenshots/login.png)
+
+### 🖥️ Dashboard — Student Overview
+![Dashboard](Screenshots/Add.png)
+
+### 📝 Marks Entry
+![Add Marks](Screenshots/mark.png)
+
+### 📊 View Result — SGPA / CGPA Breakdown
+![Result View](Screenshots/result.png)
+
+### 🗄️ MySQL Workbench — Live Database
+![Database](Screenshots/db.png)
+
+---
 
 ---
 
@@ -165,18 +187,21 @@ MiniProject/
 ## 🛢️ Database Schema
 
 ```sql
--- Authentication
+CREATE DATABASE IF NOT EXISTS student_result_db;
+USE student_result_db;
+
+-- Admin
 CREATE TABLE admin (
   id       INT AUTO_INCREMENT PRIMARY KEY,
-  username VARCHAR(50),
-  password VARCHAR(100)
+  username VARCHAR(50)  NOT NULL,
+  password VARCHAR(100) NOT NULL
 );
 
--- Student profiles
+-- Students
 CREATE TABLE students (
   id               INT AUTO_INCREMENT PRIMARY KEY,
-  name             VARCHAR(100),
-  registration_no  VARCHAR(30) UNIQUE,
+  name             VARCHAR(100) NOT NULL,
+  registration_no  VARCHAR(30)  UNIQUE NOT NULL,
   roll_no          VARCHAR(20),
   batch            VARCHAR(20),
   stream           VARCHAR(100),
@@ -184,24 +209,24 @@ CREATE TABLE students (
   cgpa             DECIMAL(4,2) DEFAULT 0.00
 );
 
--- Semester records per student
+-- Semesters
 CREATE TABLE semesters (
   id          INT AUTO_INCREMENT PRIMARY KEY,
-  student_id  INT,
-  sem_number  INT,
+  student_id  INT NOT NULL,
+  sem_number  INT NOT NULL,
   session     VARCHAR(30),
   sgpa        DECIMAL(4,2) DEFAULT 0.00,
-  FOREIGN KEY (student_id) REFERENCES students(id)
+  FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
 );
 
--- Course/subject-wise marks
+-- Courses
 CREATE TABLE courses (
   id              INT AUTO_INCREMENT PRIMARY KEY,
-  semester_id     INT,
+  semester_id     INT NOT NULL,
   course_code     VARCHAR(20),
   course_name     VARCHAR(100),
   component       ENUM('TH','PR','TW','OR'),
-  credits         INT,
+  credits         INT DEFAULT 0,
   marks_obtained  DECIMAL(5,2),
   marks_total     DECIMAL(5,2),
   percentage      DECIMAL(5,2),
@@ -210,9 +235,43 @@ CREATE TABLE courses (
   register_type   ENUM('Regular','Ex-Student','ATKT'),
   status          ENUM('Registered','Cancelled'),
   result          ENUM('PASS','FAIL'),
-  FOREIGN KEY (semester_id) REFERENCES semesters(id)
+  FOREIGN KEY (semester_id) REFERENCES semesters(id) ON DELETE CASCADE
 );
-```
+
+-- View
+DROP VIEW IF EXISTS student_full_view;
+CREATE VIEW student_full_view AS
+SELECT
+    st.id, st.name, st.registration_no, st.roll_no,
+    st.batch, st.stream, st.section,
+    COUNT(DISTINCT s.id)  AS total_semesters,
+    COUNT(DISTINCT c.id)  AS total_courses,
+    COALESCE(SUM(CASE WHEN c.credits > 0 THEN c.credits ELSE 0 END), 0) AS total_credits,
+    COALESCE(SUM(CASE WHEN c.result = 'PASS' THEN 1 ELSE 0 END), 0) AS courses_passed,
+    COALESCE(SUM(CASE WHEN c.result = 'FAIL' THEN 1 ELSE 0 END), 0) AS courses_failed,
+    CASE
+        WHEN COUNT(c.id) = 0 THEN 'NO DATA'
+        WHEN SUM(CASE WHEN c.result = 'FAIL' THEN 1 ELSE 0 END) > 0 THEN 'FAIL'
+        ELSE 'PASS'
+    END AS overall_status,
+    ROUND(IFNULL(st.cgpa, 0), 2) AS cgpa,
+    (SELECT s2.session FROM semesters s2
+     WHERE s2.student_id = st.id
+     ORDER BY s2.sem_number DESC LIMIT 1) AS latest_session,
+    (SELECT c2.register_type FROM courses c2
+     JOIN semesters s2 ON c2.semester_id = s2.id
+     WHERE s2.student_id = st.id
+     GROUP BY c2.register_type
+     ORDER BY COUNT(*) DESC LIMIT 1) AS register_type
+FROM students st
+LEFT JOIN semesters s ON s.student_id = st.id
+LEFT JOIN courses c   ON c.semester_id = s.id
+GROUP BY st.id, st.name, st.registration_no, st.roll_no,
+         st.batch, st.stream, st.section, st.cgpa
+ORDER BY st.name;
+
+-- Default admin
+INSERT INTO admin (username, password) VALUES ('admin', 'admin123');
 
 ---
 
